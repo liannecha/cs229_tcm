@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import f1_score
+from sklearn.utils.class_weight import compute_class_weight
 
 class TCMDataset(Dataset):
     def __init__(self, X, concept_targets):
@@ -74,10 +75,23 @@ class TCMNet(nn.Module):
         return concept_preds, syndrome_preds
 
 # now training loop
-def train_model(model, dataloader, epochs=100):
+def train_model(model, dataloader, epochs=100, class_weights=None, lambda_concept=1.0, lambda_syndrome=1.0):
     # We are going to use mean squared error for the concept predictions, and cross-entropy loss for the syndrome classification
+    # the issue with having two different loss functions is that they are on different scales
+    # this is leading to an oversmearing problem, so we can just scale the losses to be on a similar scale
+
+    # another fix to the oversmearing problem is to overly punish rare symptoms
+    # that way, the model doesn't overpredict common symptoms and underpredict rare symptoms, which is what we are seeing right now
+    # we can do this by adding a weight to the MSE loss for each symptom, based on the inverse frequency of that symptom in the dataset
+
     criterion_concept = nn.MSELoss() # mse for distance, since its continuous values
-    criterion_syndrome = nn.CrossEntropyLoss() # cross-entropy for classification, since we are choosing one category, need to punish
+
+    if class_weights is not None:
+        # move weights here
+        # need to ensure class_weights is a tensor on the same device as the model
+        criterion_syndrome = nn.CrossEntropyLoss(weight=class_weights) # cross-entropy for classification, since we are choosing one category, need to punish
+    else:
+        criterion_syndrome = nn.CrossEntropyLoss()
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -98,19 +112,25 @@ def train_model(model, dataloader, epochs=100):
             true_syndromes = true_syndromes.long() # ensure true syndromes are long for cross-entropy
 
             # calculate losses
-            loss_concept = criterion_concept(pred_concepts, true_concepts)
-            loss_syndrome = criterion_syndrome(pred_syndromes, true_syndromes)
+            # here is where we can scale the losses
+            raw_loss_concept = criterion_concept(pred_concepts, true_concepts)
+            raw_loss_syndrome = criterion_syndrome(pred_syndromes, true_syndromes)
+
+            # scale the losses to be on a similar scale
+            scaled_loss_concept = raw_loss_concept * lambda_concept
+            scaled_loss_syndrome = raw_loss_syndrome * lambda_syndrome
 
             # combine for total loss
-            loss = loss_concept + loss_syndrome
+            loss = scaled_loss_concept + scaled_loss_syndrome
 
             # backprop
             loss.backward()
             optimizer.step()
 
+            # we track raw losses for plotting
             epoch_total += loss.item()
-            epoch_concept += loss_concept.item()
-            epoch_syndrome += loss_syndrome.item()
+            epoch_concept += raw_loss_concept.item()
+            epoch_syndrome += raw_loss_syndrome.item()
         
         history['total'].append(epoch_total / len(dataloader))
         history['concept'].append(epoch_concept / len(dataloader))
@@ -140,9 +160,26 @@ train_loader = DataLoader(first_dataset, batch_size=233, shuffle=True)
 # initialise the model
 model = TCMNet(num_symptoms=actual_num_symptoms, num_concepts=14, num_syndromes=actual_num_syndromes)
 
+# here, we will calculate the class weights based on the frequency of each syndrome in the dataset, to help with the oversmearing problem
+syndrome_labels = first_dataset.y_syndrome.numpy() # get the syndrome labels as a numpy array
+# need this to calculate class weights
+weights = compute_class_weight(class_weight='balanced', classes=np.unique(syndrome_labels), y=syndrome_labels)
+
+class_weight_tensor = torch.tensor(weights, dtype=torch.float)
+
 # train the model
 print("Starting training...")
-loss_history = train_model(model, train_loader, epochs=100)
+loss_history = train_model(
+    model, 
+    train_loader,
+    epochs=100,
+    class_weights=class_weight_tensor,
+    # this is to weight the loss concepts
+    # Cross-entropy or syndrome loss is usually around 0.5 to 1.0, while MSE or concept loss is around 0.01 to 0.1, 
+    # so we need to scale the concept loss up by about 10x to be on a similar scale
+    lambda_concept = 10.0, 
+    lambda_syndrome = 1.0
+)
 
 def evaluate_model(trained_model, dataloader):
     trained_model.eval() # set model to evaluation mode
@@ -207,6 +244,8 @@ def plot_patient_profile(model, dataset, index=0):
 
     concept_labels = ['Wood', 'Fire', 'Earth', 'Metal', 'Water', 'Reproductive', 'Hot', 'Cold', 'Internal', 'External', 'Deficiency', 'Excess', 'Yin', 'Yang']
 
+    # the thing is that each symptom appears exactly once
+    # so the anti over-smearing won't work until we get a larger dataset
     x = np.arange(len(concept_labels))
     width = 0.35
 
@@ -270,6 +309,7 @@ def evaluate_model_extra(trained_model, dataloader):
 
 metrics_dict = evaluate_model_extra(model, train_loader)
 
+# plotting the overall metrics in a bar chart for better visualization
 def plot_overall_metrics(metrics_dict):
     labels = list(metrics_dict.keys())
     values = list(metrics_dict.values())
