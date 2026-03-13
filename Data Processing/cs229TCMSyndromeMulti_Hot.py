@@ -1,3 +1,11 @@
+"""
+Owner: Ethan
+
+Creates a multi-hot encoded feature set for syndromes based on their associated symptoms. 
+Each row represents a syndrome, and each column represents a symptom. 
+A value of 1 indicates the presence of the symptom in the syndrome, while a value of 0 indicates its absence. 
+The resulting dataset is saved as "Final_Training_Features_Syndrome_Symptom.csv".
+"""
 import pandas as pd
 
 edges_df = pd.read_csv("Symptom_Syndrome_Edges.csv")

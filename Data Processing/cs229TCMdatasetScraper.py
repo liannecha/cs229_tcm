@@ -1,3 +1,14 @@
+"""
+Owner: Ethan
+
+Extract data from the SymMap website, which contains information about the relationships between symptoms, 
+syndromes, and herbs in Traditional Chinese Medicine (TCM). 
+
+The data is stored in JSON format on the website, and we used regexes to extract it. 
+
+We used this to create Symptom_Syndrome_Edges.csv and Syndrome_Herb_Edges.csv.
+"""
+
 import json
 import requests
 import pandas as pd
