@@ -1,3 +1,11 @@
+"""
+Owner: Ethan
+
+This code extracts the location of symptoms from the SMTS dataset and maps them to the TCM "zang-fu" system of organs.
+It creates binary features indicating whether a symptom is associated with each organ group 
+(Wood, Fire, Earth, Metal, Water, Reproductive) based on keyword matching in the symptom's locus, name, and definition. 
+The resulting features are saved to Symptom_Location_Features.csv.
+"""
 import pandas as pd
 import numpy as np
 

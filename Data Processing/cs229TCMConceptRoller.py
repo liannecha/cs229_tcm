@@ -1,3 +1,19 @@
+"""
+Owner: Ethan
+
+Combines all datasets and then performs matrix multiplication to scale from 0-1 how important each feature is.
+
+This script takes the symptom features and the location/coordinate features and 
+combines them to create a new feature matrix where each syndrome is represented by 
+the presence or absence of concepts derived from the symptoms.
+Essentially, combining the symptom features with the location and coordinate features 
+to create a new representation of the syndromes in terms of the underlying concepts.
+
+Relevant files:
+- Final_Training_Features_Syndrome_Symptom.csv: The original symptom features for each syndrome.
+- Symptom_Location_Features.csv: The location features for each symptom.
+- SMTS_eight_principles_by_id.csv: The coordinate features for each symptom.
+"""
 import pandas as pd
 
 # Load primary feature matrix (233 Syndromes x 1717 Symptoms)
