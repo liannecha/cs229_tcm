@@ -1,12 +1,11 @@
 # cs229_tcm
 
-Manual Data Processing
-eight_principles_terms.csv: directly taken from the symptom definitions from the original dataset Synptoms_Data_SymMap_SMTS.xlsx
+
 
 Data Processing Flow
 -> cs229RCMdatasetScraper.py 
 -> cs229TCMSyndromeMulti_Hot.py
--> cs229TCMLocation.py, label_smts_by_id.py
+-> cs229TCMLocation.py, symptoms_eight_principles_multi_hot.py
 -> cs229TCMConceptRoller.py
 
 Output (Datasets)
@@ -21,3 +20,10 @@ Testing Data
 
 Baseline model: TAN
 Real model: Neural Network
+
+----------
+
+With Herb Layer:
+Additional Data Processing
+herbs_eight_principles_multi_hot.py 
+-> Herb_Eight_Principles_Multihot.csv
