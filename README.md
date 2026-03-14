@@ -23,7 +23,11 @@ Real model: Neural Network
 
 ----------
 
-With Herb Layer:
+Herb Layer:
+
 Additional Data Processing
+
 herbs_eight_principles_multi_hot.py 
 -> Herb_Eight_Principles_Multihot.csv
+herbs_location_multi_hot.py
+-> Herb_Location_Features.csv
