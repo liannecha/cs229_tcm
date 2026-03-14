@@ -439,7 +439,7 @@ def build_syndrome_herb_prior(syndrome_herb_file, concept_file):
 # dot product gives higher scores to herbs that share the same active principles and locations
 def recommend_herbs(pred_concepts, pred_syndrome_idx, herb_concept_matrix, syndrome_herb_prior, herb_ids, alpha=0.7, top_k=5):
     concept_similarity = herb_concept_matrix @ pred_concepts
-      # normalise to [0, 1]
+    # normalise to [0, 1]
     concept_similarity = concept_similarity / 14.0
     # prior: 1 for herbs known to treat this syndrome, 0 otherwise
     prior = syndrome_herb_prior[pred_syndrome_idx]
@@ -449,9 +449,6 @@ def recommend_herbs(pred_concepts, pred_syndrome_idx, herb_concept_matrix, syndr
         return []
 
     final_scores = alpha * concept_similarity + (1 - alpha) * prior
-
-    # mask out herbs not in this syndrome, then pick top-k
-    final_scores[~syndrome_herb_mask] = -1
     top_k_indices = np.argsort(final_scores)[::-1][:top_k]
 
     results = [(herb_ids[i], round(final_scores[i], 4)) for i in top_k_indices]

@@ -16,6 +16,8 @@ import re
 from collections import Counter
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import networkx as nx
 
@@ -270,6 +272,70 @@ class TANClassifier:
         return self.predict_proba(X_bin).argmax(axis=1)
 
 
+def load_herb_data(syndrome_herb_file, syndrome_ids):
+    # read the syndrome-herb matrix and make sure rows are in the same order as syndrome_ids
+    herb_df = pd.read_csv(syndrome_herb_file, index_col=0)
+    herb_df.index = herb_df.index.astype(str)
+    syndrome_ids = [str(x) for x in syndrome_ids]
+    herb_df = herb_df.reindex(syndrome_ids).fillna(0)
+    herb_ids = herb_df.columns.tolist()
+    syndrome_herb_matrix = herb_df.values.astype(np.float32)
+    return syndrome_herb_matrix, herb_ids
+
+
+def recommend_herbs_tan(syndrome_probs, syndrome_herb_matrix, top_k=5):
+    # weigh each herb by how probable its syndromes are, then take the top k
+    herb_scores = syndrome_probs @ syndrome_herb_matrix
+    return np.argsort(-herb_scores)[:top_k]
+
+
+def evaluate_herb_recommendations(proba, y_true, syndrome_herb_matrix, k_values=(1, 3, 5, 7, 10)):
+    mean_precisions = []
+    mean_recalls = []
+
+    for k in k_values:
+        precisions = []
+        recalls = []
+
+        for i in range(len(y_true)):
+            top_indices = set(recommend_herbs_tan(proba[i], syndrome_herb_matrix, top_k=k).tolist())
+            # ground truth: whichever herbs are listed for this patient's actual syndrome
+            true_indices = set(np.where(syndrome_herb_matrix[y_true[i]] > 0)[0].tolist())
+
+            true_pos = len(top_indices & true_indices)
+            precisions.append(true_pos / len(top_indices) if top_indices else 0)
+            recalls.append(true_pos / len(true_indices) if true_indices else 0)
+
+        mean_precisions.append(float(np.mean(precisions)))
+        mean_recalls.append(float(np.mean(recalls)))
+        print(f"k={k:2d}  |  Mean Precision@k: {np.mean(precisions):.4f}  |  Mean Recall@k: {np.mean(recalls):.4f}")
+
+    return mean_precisions, mean_recalls
+
+
+def plot_herb_pk_curve(out_dir, k_values, mean_precisions, mean_recalls):
+    # show how precision drops and recall rises as we recommend more herbs
+    plt.figure(figsize=(8, 5))
+    plt.plot(k_values, mean_precisions, marker='o', linewidth=2, label='Precision@k')
+    plt.plot(k_values, mean_recalls, marker='s', linewidth=2, label='Recall@k')
+
+    # label each point so the values are easy to read
+    for k, p, r in zip(k_values, mean_precisions, mean_recalls):
+        plt.annotate(f'{p:.2f}', (k, p), textcoords='offset points', xytext=(0, 8), ha='center', fontsize=9)
+        plt.annotate(f'{r:.2f}', (k, r), textcoords='offset points', xytext=(0, -14), ha='center', fontsize=9)
+
+    plt.title('Herb Recommendation Precision@k and Recall@k (TAN)', fontsize=15)
+    plt.xlabel('k (number of herbs recommended)', fontsize=12)
+    plt.ylabel('Score', fontsize=12)
+    plt.xticks(k_values)
+    plt.ylim(0, 1.1)
+    plt.legend(fontsize=11)
+    plt.grid(True, linestyle='--', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "herb_pk_curve.png"), dpi=300, bbox_inches="tight")
+    plt.close()
+
+
 def save_predictions_csv(out_dir, proba, y_true, y_pred, syndrome_ids):
     conf = proba[np.arange(len(y_true)), y_pred]
     df = pd.DataFrame({
@@ -285,6 +351,26 @@ def save_top_confusions_csv(out_dir, y_true, y_pred, syndrome_ids):
     rows = [(syndrome_ids[yt], syndrome_ids[yp], cnt) for (yt, yp), cnt in pairs.items()]
     df = pd.DataFrame(rows, columns=["true", "predicted", "count"]).sort_values("count", ascending=False)
     df.to_csv(os.path.join(out_dir, "top_confusions.csv"), index=False)
+
+
+def save_herb_predictions_csv(out_dir, proba, y_true, syndrome_herb_matrix, herb_ids, k=5):
+    rows = []
+
+    for i in range(len(y_true)):
+        herb_scores = proba[i] @ syndrome_herb_matrix
+        top_idx = np.argsort(-herb_scores)[:k]
+        true_idx = np.where(syndrome_herb_matrix[y_true[i]] > 0)[0]
+
+        rows.append({
+            "patient_index": i,
+            "true_syndrome_index": int(y_true[i]),
+            "true_herbs": ",".join([str(herb_ids[j]) for j in true_idx]),
+            "top_predicted_herbs": ",".join([str(herb_ids[j]) for j in top_idx]),
+            "top_predicted_scores": ",".join([f"{herb_scores[j]:.4f}" for j in top_idx]),
+        })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(out_dir, "herb_predictions_topk.csv"), index=False)
 
 
 # bar chart of overall test metrics
@@ -310,7 +396,6 @@ def plot_overall_metrics_bar(out_dir, metrics, label="TAN"):
     pd.DataFrame([{"model": label, **metrics}]).to_csv(os.path.join(out_dir, "metrics_tan.csv"), index=False)
 
 
-# learning curve - refit with different training sizes to see how data helps
 def plot_learning_curve(out_dir, Xtr, ytr, Xte, yte, fractions=(0.1, 0.25, 0.5, 0.75, 1.0), seed=0):
     rng = np.random.default_rng(seed)
     N = len(ytr)
@@ -372,6 +457,7 @@ def run_experiment(
     location_csv,
     patient_symptoms_csv,
     patient_labels_csv,
+    syndrome_herb_file=None,
     out_dir="outputs",
     seed=0,
     max_features=200,
@@ -426,6 +512,32 @@ def run_experiment(
 
     metrics = {"accuracy": acc, "top5_accuracy": top5, "macro_f1": mf1}
 
+    herb_results = None
+    if syndrome_herb_file is not None:
+        syndrome_herb_matrix, herb_ids = load_herb_data(syndrome_herb_file, syndrome_ids)
+
+        print("\nHerb recommendation results:")
+        k_values = (1, 3, 5, 7, 10)
+        mean_precisions, mean_recalls = evaluate_herb_recommendations(
+            proba, yte, syndrome_herb_matrix, k_values=k_values
+        )
+
+        plot_herb_pk_curve(out_dir, k_values, mean_precisions, mean_recalls)
+        save_herb_predictions_csv(out_dir, proba, yte, syndrome_herb_matrix, herb_ids, k=5)
+
+        herb_results = {
+            "k_values": k_values,
+            "precision_at_k": mean_precisions,
+            "recall_at_k": mean_recalls,
+            "herb_ids": herb_ids,
+        }
+
+        pd.DataFrame({
+            "k": k_values,
+            "precision_at_k": mean_precisions,
+            "recall_at_k": mean_recalls,
+        }).to_csv(os.path.join(out_dir, "herb_metrics.csv"), index=False)
+
     # save outputs
     save_predictions_csv(out_dir, proba, yte, yhat, syndrome_ids)
     save_top_confusions_csv(out_dir, yte, yhat, syndrome_ids)
@@ -441,16 +553,18 @@ def run_experiment(
         "feat_names_sub": feat_names_sub,
         "feat_idx": feat_idx,
         "metrics": metrics,
+        "herb_results": herb_results,
     }
 
 
 if __name__ == "__main__":
     run_experiment(
-        syndrome_symptom_csv="../processed datasets/Final_Training_Features_Syndrome_Symptom.csv",
-        eight_principles_csv="../processed datasets/SMTS_eight_principles_by_id.csv",
-        location_csv="../processed datasets/Symptom_Location_Features.csv",
-        patient_symptoms_csv="../Patient Datasets/Synthetic_Patient_Symptoms.csv",
-        patient_labels_csv="../Patient Datasets/Synthetic_Patient_Labels.csv",
+        syndrome_symptom_csv="Processed Datasets/Final_Training_Features_Syndrome_Symptom.csv",
+        eight_principles_csv="Legacy/SMTS_eight_principles_by_id.csv",
+        location_csv="Processed Datasets/Symptom_Location_Features.csv",
+        patient_symptoms_csv="Patient Datasets/Synthetic_Patient_Symptoms.csv",
+        patient_labels_csv="Patient Datasets/Synthetic_Patient_Labels.csv",
+        syndrome_herb_file="Processed Datasets/Syndrome_Herb_Targets.csv",
         out_dir="outputs",
         seed=0,
         max_features=200,
