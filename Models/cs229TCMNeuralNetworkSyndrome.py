@@ -1,3 +1,9 @@
+"""
+Owner: Ethan
+
+Defines a neural network model for predicting TCM syndromes from symptoms, with an intermediate layer for predicting TCM concepts. 
+The model is trained on a dataset of syndromes, symptoms, and concept labels.
+"""
 import torch
 import torch.nn as nn
 import torch.optim as optim

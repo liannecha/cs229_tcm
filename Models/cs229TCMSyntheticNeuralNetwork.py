@@ -1,3 +1,8 @@
+"""
+Owner: Ethan
+
+Same as cs229TCMNeuralNetworkSyndrome, but trained on synthetic patient data.
+"""
 import torch
 import torch.nn as nn
 import torch.optim as optim

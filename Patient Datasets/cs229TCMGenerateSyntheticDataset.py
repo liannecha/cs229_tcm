@@ -1,3 +1,16 @@
+"""
+Owner: Ethan
+
+Generates a synthetic dataset of patients using a context aware strategy, 
+where we use the compatibility scores between symptoms and concepts to guide 
+the generation of new symptoms for each syndrome. This ensures that the synthetic patients 
+we generate are plausible and consistent with the underlying TCM theory, rather than 
+just randomly adding symptoms which may not make sense together. 
+
+We also drop some existing symptoms with a certain probability to make it more 
+realistic and less likely to just learn the original dataset. The resulting synthetic 
+dataset can be used to train our model and improve its generalisation performance.
+"""
 # Generate a dataset of synthetic patients
 # using context aware strategy to ensure plausible patient conditions
 
