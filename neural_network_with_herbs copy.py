@@ -143,19 +143,31 @@ class TCMNet(nn.Module):
             # shape is (num_herbs, 14) where each row is that herb's location + eight principles features
             self.register_buffer('herb_concept_mat', torch.tensor(herb_concept_matrix, dtype=torch.float))
 
-            # herb scorer: for each herb, concatenate everything we know about the patient with that herb's known concept features
-            # and score it with a small mlp
-            # input is shared_features (512) + concept_preds (14) + syndrome_probs (233) + herb_concept_features (14) = 773 dims
-            # we feed everything in directly so no information is lost before scoring
-            # we apply this to all herbs at once using broadcasting so we don't need a loop
-            self.herb_scorer = nn.Sequential(
-                nn.Linear(512 + num_concepts + num_syndromes + num_concepts, 256),
+            # patient encoder: compress everything we know about the patient into a small embedding
+            # input is shared features + predicted concepts + syndrome probabilities
+            # we use softmax syndrome probs (not argmax) so uncertainty over syndromes flows through
+            # output is a 64-dim vector that represents what kind of herb this patient needs
+            self.patient_encoder = nn.Sequential(
+                nn.Linear(512 + num_concepts + num_syndromes, 128),
                 nn.ReLU(),
                 nn.Dropout(0.2),
-                nn.Linear(256, 1)
+                nn.Linear(128, 64)
+            )
+
+            # herb scorer: for each herb, concatenate the patient embedding with that herb's known concept features
+            # and score it with a small mlp
+            # this is different from just doing a dot product because the mlp can learn non-linear interactions
+            # between what the patient needs and what each herb provides
+            # input is patient_emb (64) + herb_concept_features (14) = 78 dims, output is a single score
+            # we apply this to all herbs at once using broadcasting so we don't need a loop
+            self.herb_scorer = nn.Sequential(
+                nn.Linear(64 + num_concepts, 32),
+                nn.ReLU(),
+                nn.Linear(32, 1)
             )
         else:
             self.herb_concept_mat = None
+            self.patient_encoder = None
             self.herb_scorer = None
 
     # need a forward pass
@@ -173,20 +185,20 @@ class TCMNet(nn.Module):
         syndrome_preds = self.syndrome_head(combined_features)
 
         if self.herb_concept_mat is not None:
-            # concatenate everything we know about the patient into one vector
-            # we use softmax syndrome probs (not argmax) so uncertainty over syndromes flows through to herbs
-            syndrome_probs = torch.softmax(syndrome_preds, dim=1)
-            patient_context = torch.cat((shared_features, concept_preds, syndrome_probs), dim=1)  # (batch, 759)
+            # encode the full patient context into a 64-dim embedding
+            syndrome_probs = torch.softmax(syndrome_preds, dim=1) # softmax so uncertainty flows through to herbs
+            patient_context = torch.cat((shared_features, concept_preds, syndrome_probs), dim=1)
+            patient_emb = self.patient_encoder(patient_context)  # (batch, 64)
 
-            batch_size = patient_context.size(0)
+            batch_size = patient_emb.size(0)
             num_herbs = self.herb_concept_mat.size(0)
 
-            # broadcast patient context and herb features so we can score all herbs at once
-            patient_context_exp = patient_context.unsqueeze(1).expand(-1, num_herbs, -1)    # (batch, num_herbs, 759)
+            # broadcast patient embedding and herb features so we can score all herbs at once
+            patient_emb_exp = patient_emb.unsqueeze(1).expand(-1, num_herbs, -1)           # (batch, num_herbs, 64)
             herb_feats_exp = self.herb_concept_mat.unsqueeze(0).expand(batch_size, -1, -1)  # (batch, num_herbs, 14)
 
-            # concatenate and score: (batch, num_herbs, 773) -> (batch, num_herbs)
-            scorer_input = torch.cat([patient_context_exp, herb_feats_exp], dim=2)
+            # concatenate and score: (batch, num_herbs, 78) -> (batch, num_herbs)
+            scorer_input = torch.cat([patient_emb_exp, herb_feats_exp], dim=2)
             herb_preds = torch.sigmoid(self.herb_scorer(scorer_input).squeeze(2)) # sigmoid for multi-label
 
             return concept_preds, syndrome_preds, herb_preds
